@@ -1,0 +1,31 @@
+id: ts-return-await
+language: typescript
+severity: warning
+message: '`return await x` outside `try` - return the promise: `return x` (keep `await` when a `using` resource is held)'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  pattern: return await $X;
+  not:
+    any:
+    - inside:
+        kind: try_statement
+        stopBy: end
+    - regex: (?:[^\n]*\n){12,}
+---
+id: ts-declare-then-return
+language: typescript
+severity: warning
+message: '`const x = e; return x;` - return the expression directly (keep the binding when `e` refers to `x`)'
+metadata:
+  weight: 5
+  category: slop
+  source: slopcheck-deslop
+rule:
+  pattern: return $X;
+  follows:
+    stopBy: neighbor
+    pattern: const $X = $EXPR;
+  not:
+    regex: (?:[^\n]*\n){12,}

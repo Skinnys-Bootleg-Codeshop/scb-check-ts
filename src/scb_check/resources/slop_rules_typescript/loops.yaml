@@ -1,0 +1,74 @@
+id: ts-push-loop
+language: typescript
+severity: warning
+message: '`for` loop whose only job is `out.push(...)` - use `.map(...)` (`.flatMap` for spread pushes; arrays only)'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: for_in_statement
+  has:
+    field: body
+    regex: ^(\{\s*)?[\w$.]+\.push\([^\n;]*\);?(\s*\})?$
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-filter-push-loop
+language: typescript
+severity: warning
+message: '`for` loop that pushes inside one `if` - use `.filter(...)`, then `.map(...)` when the pushed value differs from the item'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: for_in_statement
+  has:
+    field: body
+    regex: ^\{\s*if \([^\n]*\)\s*(\{\s*)?[\w$.]+\.push\([^\n;]*\);\s*(\}\s*)?\}$
+    not:
+      has:
+        kind: else_clause
+        stopBy: end
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-accumulator-loop
+language: typescript
+severity: warning
+message: '`for` loop whose only job is `total += ...` - use `.reduce(...)`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: for_in_statement
+  has:
+    field: body
+    regex: ^(\{\s*)?[\w$.\[\]]+ \+= [^\n;]*;?(\s*\})?$
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-foreach-push
+language: typescript
+severity: warning
+message: '`.forEach` that only pushes - use `.map(...)`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  any:
+  - pattern: $X.forEach(($I) => { $R.push($V); })
+  - pattern: $X.forEach($I => { $R.push($V); })
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-filter-first
+language: typescript
+severity: warning
+message: '`.filter(f)[0]` builds a whole array - use `.find(f)`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  pattern: $X.filter($$$A)[0]
+  not:
+    regex: (?:[^\n]*\n){12,}

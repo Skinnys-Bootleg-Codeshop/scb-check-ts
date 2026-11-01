@@ -19,6 +19,13 @@ logger = get_logger(__name__)
 _PYTHON_ENV_AST_GREP_BINARIES = ("sg", "ast-grep")
 
 
+_ARGV_BATCH = 1000
+
+
+class AstGrepError(ValueError):
+    """Raised by strict ast-grep runs when no binary produces usable output."""
+
+
 def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
     """Invoke ast-grep against ``files`` using ``rules_path``.
 
@@ -28,25 +35,97 @@ def run_sg(files: tuple[Path, ...], rules_path: Path) -> tuple[AstGrepHit, ...]:
     binary succeeds, subprocess execution fails, all exits are non-zero,
     or the JSON payload is unparseable. A missing binary is treated as a
     hard failure, so scb-check still produces clone and erosion numbers.
-    Line and column numbers in the returned hits are 1-indexed.
+    Line and column numbers in the returned hits are 1-indexed. Files are
+    passed in batches of at most 1000 so argv stays below the OS limit.
     """
-    commands = _commands(files, rules_path)
-    last_failure: subprocess.CompletedProcess[str] | OSError | None = None
+    hits: list[AstGrepHit] = []
+    for batch in _batches(files):
+        commands = _commands(batch, rules_path)
+        last_failure: subprocess.CompletedProcess[str] | OSError | None = None
+        for command in commands:
+            result = _run_command(command)
+            if isinstance(result, OSError):
+                last_failure = result
+                continue
+
+            if result.returncode == 0:
+                hits.extend(_parse_hits(result.stdout))
+                last_failure = None
+                break
+
+            last_failure = result
+
+        if last_failure is not None:
+            _log_run_failure(last_failure)
+
+    return _sorted_hits(hits)
+
+
+def run_sg_strict(
+    files: tuple[Path, ...],
+    rules_path: Path,
+) -> tuple[AstGrepHit, ...]:
+    """Invoke ast-grep like `run_sg`, but raise `AstGrepError` on any failure."""
+    if not files:
+        return ()
+
+    hits: list[AstGrepHit] = []
+    for batch in _batches(files):
+        commands = _commands(batch, rules_path)
+        if not commands:
+            raise AstGrepError(
+                "ast-grep could not run: binary not found or rules file missing",
+            )
+
+        stdout = _first_success(commands)
+        lines = [line for line in stdout.splitlines() if line.strip()]
+        parsed = [hit for line in lines if (hit := _parse_hit(line)) is not None]
+        if len(parsed) != len(lines):
+            raise AstGrepError("ast-grep output could not be parsed")
+        hits.extend(parsed)
+
+    return _sorted_hits(hits)
+
+
+def _first_success(commands: tuple[tuple[str, ...], ...]) -> str:
+    detail = "no binary ran"
     for command in commands:
         result = _run_command(command)
         if isinstance(result, OSError):
-            last_failure = result
+            detail = f"failed to execute: {result}"
             continue
 
         if result.returncode == 0:
-            return _parse_hits(result.stdout)
+            return result.stdout
 
-        last_failure = result
+        stderr_lines = result.stderr.strip().splitlines()
+        first_line = stderr_lines[0] if stderr_lines else ""
+        detail = f"exit code {result.returncode}: {first_line}"
 
-    if last_failure is not None:
-        _log_run_failure(last_failure)
+    raise AstGrepError(f"ast-grep failed ({detail})")
 
-    return ()
+
+def _batches(files: tuple[Path, ...]) -> tuple[tuple[Path, ...], ...]:
+    if not files:
+        return ((),)
+    return tuple(
+        files[start : start + _ARGV_BATCH]
+        for start in range(0, len(files), _ARGV_BATCH)
+    )
+
+
+def _sorted_hits(hits: list[AstGrepHit]) -> tuple[AstGrepHit, ...]:
+    return tuple(
+        sorted(
+            hits,
+            key=lambda hit: (
+                hit.file.as_posix(),
+                hit.line,
+                hit.col,
+                hit.rule_id,
+            ),
+        ),
+    )
 
 
 def _commands(files: tuple[Path, ...], rules_path: Path) -> tuple[tuple[str, ...], ...]:
@@ -126,22 +205,11 @@ def _log_run_failure(failure: subprocess.CompletedProcess[str] | OSError) -> Non
 
 
 def _parse_hits(stdout: str) -> tuple[AstGrepHit, ...]:
-    hits = tuple(
+    return tuple(
         hit
         for line in stdout.splitlines()
         if line.strip()
         if (hit := _parse_hit(line)) is not None
-    )
-    return tuple(
-        sorted(
-            hits,
-            key=lambda hit: (
-                hit.file.as_posix(),
-                hit.line,
-                hit.col,
-                hit.rule_id,
-            ),
-        ),
     )
 
 

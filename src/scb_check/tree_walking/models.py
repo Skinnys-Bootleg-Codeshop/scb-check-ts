@@ -29,6 +29,7 @@ class Language(StrEnum):
     PYTHON = "python"
     PYTHON_STUB = "python-stub"
     RUST = "rust"
+    TSX = "tsx"
     TYPESCRIPT = "typescript"
     ZIG = "zig"
 

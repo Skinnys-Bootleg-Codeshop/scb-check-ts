@@ -23,11 +23,21 @@ Implemented analysis paths:
 
 ## Runtime contracts
 
-- Exit `0` means the run completed, even when findings were reported.
+- `scb-check check` exits `0` with no findings, `1` when any finding is reported (see `commands/check.py`), and `2` for usage errors. `scb-check delta` is a report, not a gate: it exits `0` whatever the direction of change.
 - Exit `2` is for user-facing failures such as bad config, bad paths, unknown rules, invalid directives, or no discoverable supported source files.
 - Individual parse failures warn and skip the file instead of aborting the run.
-- Non-Python files skip Python ast-grep rules, structural rules, and source directives until language-specific rules exist.
+- Non-Python files skip Python ast-grep rules, structural rules, and source directives. TypeScript and TSX files get the TypeScript rule set under `--profile ts` only.
 - Config discovery and source-directive behavior are user-facing; keep README examples synchronized when they change.
+
+## PR delta
+
+`scripts/pr-delta [PATHS...]`, run from the repository being scored, calls `scb-check delta`. It scores the merge base and the head of a pull request in a temporary export of the committed files (`git ls-tree` plus `git cat-file --batch`, so `.gitattributes` `export-ignore` cannot hide source), then prints base, head and delta for verbosity, erosion, cog_erosion, SLOC and flagged SLOC, plus the new flagged lines.
+
+- Options: `--repo`, `--base` (default `origin/dev`), `--head` (default `HEAD`), `--profile` (default `ts`), `--exclude`, `--format md|json`, `--max-lines`, `--max-seconds` (default 900). ast-grep is always strict.
+- Read-only: the scanned repo is never checked out or modified. Git verbs are `rev-parse`, `merge-base`, `status`, `cat-file`, `symbolic-ref`, `ls-tree` and `diff`, all with `--no-optional-locks`. Uncommitted changes are warned about and not scored.
+- It reports and never gates. Exit `0` whatever the direction of change; `2` usage; `3` git state (missing ref, no merge base); `4` analysis failure (including ast-grep); `5` timeout; `130` interrupted.
+- If a file is parsed on one side only, every delta cell reads `incomparable` and the output names the file.
+- Under `--profile ts` the table carries `clone_loc` as its own row, flagged "below target precision" (spike outcome, `docs/spikes/2026-11-tsx-spike.md`).
 
 ## Where to make changes
 
@@ -45,10 +55,10 @@ Implemented analysis paths:
 
 ## Adding an `ast-grep` rule
 
-1. Add or update YAML under `src/scb_check/resources/slop_rules/`.
+1. Add or update YAML under `src/scb_check/resources/slop_rules/` (Python) or `src/scb_check/resources/slop_rules_typescript/` (TypeScript: write `language: typescript`; loading adds a `language: tsx` twin with the same id unless `metadata.no_tsx_twin` is true; never use `severity: error`, which makes `sg` exit 1 and discards every hit).
 2. Use a unique rule ID across both `ast-grep` and structural rules.
 3. Set severity and any `min_file_count` metadata deliberately.
-4. Add behavioral tests that exercise `pipeline.run_sg` through monkeypatching rather than invoking `sg`.
+4. Add behavioral tests that exercise `pipeline.run_sg` through monkeypatching rather than invoking `sg`; TypeScript rules instead get real ast-grep fixtures.
 5. Update README or docs if the rule changes user-facing behavior or scoring expectations.
 
 ## Adding a structural rule
@@ -76,7 +86,7 @@ Pay special attention to:
 
 - `verbosity` as a union, never a sum,
 - `SLOC` as the denominator for verbosity and the source of counted flagged lines,
-- non-Python verbosity currently includes clone LOC but not Python ast-grep or structural rule LOC,
+- non-Python verbosity includes clone LOC, plus TypeScript ast-grep LOC under `--profile ts`, but not Python ast-grep or structural rule LOC,
 - high-complexity threshold `> 10`,
 - mass formulas for `erosion` and `cog_erosion`,
 - line spans used by clone, `ast-grep`, and structural findings.

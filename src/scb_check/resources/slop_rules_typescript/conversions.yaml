@@ -1,0 +1,93 @@
+id: ts-json-clone
+language: typescript
+severity: warning
+message: '`JSON.parse(JSON.stringify(x))` - use `structuredClone(x)` unless the JSON round trip is wanted (Dates to strings, undefined dropped)'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  pattern: JSON.parse(JSON.stringify($X))
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-string-wrap-template
+language: typescript
+severity: warning
+message: '`String(`...`)` - a template literal is already a string; drop `String()`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: call_expression
+  pattern: String($A)
+  has:
+    field: arguments
+    has:
+      kind: template_string
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-boolean-wrap-boolean
+language: typescript
+severity: warning
+message: '`Boolean(!x)` / `Boolean(a === b)` - the expression is already boolean; drop `Boolean()`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  any:
+  - pattern: Boolean(!$X)
+  - pattern: Boolean($A === $B)
+  - pattern: Boolean($A !== $B)
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-double-bang-condition
+language: typescript
+severity: warning
+message: '`!!x` as a condition - the condition already coerces; use `x`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  pattern: '!!$X'
+  not:
+    regex: (?:[^\n]*\n){12,}
+  any:
+  - inside:
+      kind: parenthesized_expression
+      inside:
+        any:
+        - kind: if_statement
+        - kind: while_statement
+  - inside:
+      kind: ternary_expression
+      field: condition
+---
+id: ts-template-single-expr
+language: typescript
+severity: warning
+message: A template literal holding only `${x}` - use `String(x)` when a string is needed
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: template_string
+  regex: ^`\$\{
+  all:
+  - regex: \}`$
+  - not:
+      has:
+        kind: string_fragment
+  - not:
+      has:
+        kind: escape_sequence
+  - not:
+      has:
+        kind: template_substitution
+        nthChild: 2
+  - not:
+      inside:
+        kind: call_expression
+  - not:
+      regex: (?:[^\n]*\n){12,}

@@ -1,0 +1,16 @@
+scb-check, https://github.com/gabeorlanski/scb-check, Apache License 2.0.
+This repository is a modified version, seeded from upstream commit a8618228939def726c2ec48b354693e5aa1999d5.
+The reporting formulas in src/scb_check/reporting/score.py are unchanged.
+
+Changes from upstream:
+- 2026-11-01 (S1): golden outputs pinned against pristine upstream (tests/golden/, scripts/make-goldens, scripts/compare-to-pristine), formula lock test, agent-worked (independent of the tool's output) TypeScript sample, pyproject license metadata corrected to Apache-2.0 to match LICENSE.
+- 2026-11-01 (A1): `.tsx` scanning (`Language.TSX`, tree-sitter `language_tsx`), `--profile ts` (test, fixture and generated exclusions, 1 MiB cap), multi-path `check`, `--exclude`, skipped-file reporting, and a value-preserving linear-time rewrite of generic cognitive complexity.
+- 2026-11-01 (A2): TSX spike (scripts/spike_tsx.py, docs/spikes/), clone filters behind `--profile ts` (`no-expression-bodies`, `no-jsx-dominated`); the ts profile uses `no-jsx-dominated`.
+- 2026-11-01 (B): per-language ast-grep rule sets (`RuleSet`, `resources/slop_rules_typescript/`), TypeScript rules and extras run under `--profile ts` in their own `sg` process, `--strict-sg`, and argv batching of 1000 files.
+- 2026-11-01 (C1): first 18 TypeScript ast-grep rules (resources/slop_rules_typescript/: type escapes, error handling, conversions) with a fixture-driven rule test harness (tests/ts_rules/). Rules marked `metadata.source: slopcheck-deslop` (ts-explicit-any, ts-as-unknown-as, ts-empty-catch, ts-catch-log-only, ts-explicit-boolean-compare, ts-inline-error-message) are adapted from slopcheck-deslop, https://github.com/godagoo/slopcheck-deslop, MIT; its licence is in licenses/slopcheck-deslop-MIT.txt.
+- 2026-11-01 (C2): remaining 22 TypeScript ast-grep rules (conditionals, functions, loops, React, comments; 40 in total) with fixtures and an agent-worked (independent of the tool's output) rule-union test (tests/hand/test_hand_union.py). Rules marked `metadata.source: slopcheck-deslop` (ts-nested-ternary, ts-self-ternary, ts-async-no-await, ts-declare-then-return) are adapted from slopcheck-deslop, https://github.com/godagoo/slopcheck-deslop, MIT; its licence is in licenses/slopcheck-deslop-MIT.txt.
+- 2026-11-01 (D): calibration on two agent-written Next.js applications (scripts/calibrate_rules.py, docs/calibration/), relabelled blind against the real SprocketLab rubric: 13 of 40 TypeScript rules pruned at the plan thresholds, 27 kept; mutation test (tests/test_mutation_slop.py); separation test (docs/calibration/2026-11-separation-prereg.md).
+- 2026-11-01 (E): `scb-check delta` and `scripts/pr-delta`, a read-only pull request delta over exports of the merge base and head read straight from git objects (src/scb_check/commands/delta.py, delta_git.py, src/scb_check/reporting/delta.py).
+- 2026-11-01 (F): baseline report (docs/baselines/2026-11-baseline.md, scripts/baseline_report.py), `delta` git calls set GIT_NO_LAZY_FETCH=1 and the missing-ref hint names the ref's own branch, README limits section, docs/development.md exit-code correction.
+
+Files in this fork have been modified from upstream. No human has reviewed these changes.

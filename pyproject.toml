@@ -7,7 +7,7 @@ name = "scb-check"
 version = "0.2.0"
 description = "CLI for measuring verbosity and erosion metrics in supported source codebases"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "ast-grep-cli==0.42.1",
@@ -94,6 +94,7 @@ ignore = [
     "ARG005",
     "FLY002",
 ]
+"scripts/**.py" = ["T201", "S603", "S607", "INP001"]
 
 
 [tool.ruff.lint.pydocstyle]

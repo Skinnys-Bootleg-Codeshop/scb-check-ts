@@ -1,0 +1,38 @@
+---
+id: ts-jsx-useless-fragment
+language: tsx
+severity: warning
+message: 'Fragment around a single element - remove `<>...</>`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: jsx_element
+  regex: ^<>
+  has:
+    field: open_tag
+    regex: ^<>$
+  all:
+  - has:
+      any:
+      - kind: jsx_element
+      - kind: jsx_self_closing_element
+  - not:
+      has:
+        kind: jsx_expression
+  - not:
+      has:
+        kind: jsx_text
+        regex: \S
+  - not:
+      has:
+        any:
+        - kind: jsx_element
+        - kind: jsx_self_closing_element
+        follows:
+          stopBy: end
+          any:
+          - kind: jsx_element
+          - kind: jsx_self_closing_element
+  - not:
+      regex: (?:[^\n]*\n){12,}

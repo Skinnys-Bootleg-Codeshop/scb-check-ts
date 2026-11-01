@@ -9,6 +9,7 @@ from scb_check.tree_walking.languages.generic import TreeSitterLanguageConfig
 from scb_check.tree_walking.languages.haskell import HASKELL_CONFIG
 from scb_check.tree_walking.languages.javascript import JAVASCRIPT_CONFIG
 from scb_check.tree_walking.languages.rust import RUST_CONFIG
+from scb_check.tree_walking.languages.typescript import TSX_CONFIG
 from scb_check.tree_walking.languages.typescript import TYPESCRIPT_CONFIG
 from scb_check.tree_walking.languages.zig import ZIG_CONFIG
 from scb_check.tree_walking.models import Language
@@ -20,6 +21,7 @@ LANGUAGE_CONFIGS = {
         HASKELL_CONFIG,
         JAVASCRIPT_CONFIG,
         RUST_CONFIG,
+        TSX_CONFIG,
         TYPESCRIPT_CONFIG,
         ZIG_CONFIG,
     )

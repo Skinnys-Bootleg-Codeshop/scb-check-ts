@@ -36,7 +36,7 @@ Do not put raw tree-sitter nodes into `ModuleIR`, `SymbolIR`, `OperationIR`, `Va
 
 A parser raises `LanguageParseError` when it cannot parse source for its own language. Dispatch wraps parser failures in `ProjectParseError`, which `pipeline.py` logs as a warning before skipping that file.
 
-The default dispatch table knows Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`). CLI discovery supplies those supported suffixes.
+The default dispatch table knows Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), TSX (`.tsx`, `tree_sitter_typescript.language_tsx`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`). CLI discovery supplies those supported suffixes.
 
 ## `SLOC`
 
@@ -51,7 +51,7 @@ The Python parser:
 
 This is why docstrings do not count as `SLOC`, but meaningful string expressions can still count when they are not plain standalone docstrings.
 
-The generic Tree-sitter parser used for Rust, JavaScript, TypeScript, Zig, Haskell, and C++ starts from non-blank lines, removes comment-only lines from grammar comment nodes including language doc comments such as Haskell `haddock` nodes, and drops punctuation-only delimiter lines such as standalone braces.
+The generic Tree-sitter parser used for Rust, JavaScript, TypeScript, TSX, Zig, Haskell, and C++ starts from non-blank lines, removes comment-only lines from grammar comment nodes including language doc comments such as Haskell `haddock` nodes, and drops punctuation-only delimiter lines such as standalone braces.
 
 ## Python walking
 
@@ -76,7 +76,7 @@ The walker only normalizes the facts current rules need. Unknown or unsupported 
 
 ## Generic multi-language walking
 
-Rust, JavaScript, TypeScript, Zig, Haskell, and C++ use `GenericTreeSitterParser` with one config per language under `tree_walking/languages/`. The generic parser intentionally emits the minimum IR needed for clone detection and erosion scoring:
+Rust, JavaScript, TypeScript, TSX, Zig, Haskell, and C++ use `GenericTreeSitterParser` with one config per language under `tree_walking/languages/`. The generic parser intentionally emits the minimum IR needed for clone detection and erosion scoring:
 
 - module language, file, span, and `SLOC` lines,
 - class-like symbols where the grammar exposes them,

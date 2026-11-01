@@ -9,11 +9,16 @@ from dataclasses import dataclass
 from dataclasses import replace
 from pathlib import Path
 
+import yaml
 from tree_sitter import Tree
 
 from scb_check.analysis.astgrep import run_sg
-from scb_check.analysis.clones import detect_clones
+from scb_check.analysis.astgrep import run_sg_strict
+from scb_check.analysis.clones import detect_clones_with_skips
+from scb_check.config import PROFILES
+from scb_check.config import CloneFilter
 from scb_check.config import Config
+from scb_check.config import ScanProfile
 from scb_check.logging import get_logger
 from scb_check.models import AstGrepHit
 from scb_check.models import CloneBlock
@@ -22,6 +27,7 @@ from scb_check.models import FindingGroups
 from scb_check.models import Flags
 from scb_check.models import LanguageSyntaxSummary
 from scb_check.models import LineGroups
+from scb_check.resources import RuleSet
 from scb_check.resources import RuleSeverity
 from scb_check.resources import load_rule_severities
 from scb_check.resources import load_thresholds
@@ -45,11 +51,23 @@ from scb_check.tree_walking.models import RuleFinding
 from scb_check.tree_walking.models import SymbolIR
 from scb_check.tree_walking.models import SymbolKind
 from scb_check.tree_walking.semantic import build_project
+from scb_check.walker import is_scannable
 from scb_check.walker import walk_source_files
 
 logger = get_logger(__name__)
 
-__all__ = ["AnalysisResult", "IgnoreDirectiveError", "analyze", "analyze_files"]
+_RULE_SET_LANGUAGES = {
+    RuleSet.PYTHON: (Language.PYTHON,),
+    RuleSet.TYPESCRIPT: (Language.TYPESCRIPT, Language.TSX),
+}
+
+__all__ = [
+    "AnalysisResult",
+    "IgnoreDirectiveError",
+    "analyze",
+    "analyze_files",
+    "analyze_paths",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +76,7 @@ class AnalysisResult:
 
     flags: Flags
     source_lines_by_file: dict[Path, tuple[str, ...]]
+    skipped_files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +90,7 @@ class ParsedSources:
     source_lines_by_file: dict[Path, tuple[str, ...]]
     language_by_file: dict[Path, Language]
     syntax_by_language: tuple[LanguageSyntaxSummary, ...]
+    skipped_files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +105,7 @@ class Findings:
     sloc_lines_by_file: dict[Path, frozenset[int]]
     source_lines_by_file: dict[Path, tuple[str, ...]]
     syntax_by_language: tuple[LanguageSyntaxSummary, ...]
+    skipped_files: tuple[Path, ...] = ()
 
 
 def analyze(
@@ -106,12 +127,58 @@ def analyze(
     )
 
 
-def analyze_files(
+def analyze_paths(  # noqa: PLR0913
+    paths: tuple[Path, ...],
+    config: Config,
+    *,
+    profile: ScanProfile = PROFILES["upstream"],
+    include_all: bool = False,
+    disable_sg: bool = False,
+    strict_sg: bool = False,
+) -> AnalysisResult:
+    """Analyze the union of supported files under `paths` using `profile`."""
+    scan_config = replace(
+        config,
+        exclude=(*config.exclude, *profile.exclude),
+        max_file_bytes=profile.max_file_bytes,
+    )
+    files = tuple(
+        sorted(
+            {
+                file
+                for path in paths
+                for file in walk_source_files(
+                    path,
+                    scan_config,
+                    include_ignored=include_all,
+                )
+                if is_scannable(file, scan_config)
+            },
+        ),
+    )
+    if not files:
+        joined = ", ".join(str(path) for path in paths)
+        raise FileNotFoundError(f"no supported source files found at {joined}")
+    return analyze_files(
+        files,
+        include_all=include_all,
+        disable_sg=disable_sg,
+        low_use_short_function=config.low_use_short_function,
+        clone_filter=profile.clone_filter,
+        rule_sets=profile.rule_sets,
+        strict_sg=strict_sg,
+    )
+
+
+def analyze_files(  # noqa: PLR0913
     files: tuple[Path, ...],
     *,
     include_all: bool = False,
     disable_sg: bool = False,
     low_use_short_function: LowUseShortFunctionSettings | None = None,
+    clone_filter: CloneFilter = "upstream",
+    rule_sets: tuple[RuleSet, ...] = (RuleSet.PYTHON,),
+    strict_sg: bool = False,
 ) -> AnalysisResult:
     """Analyze an explicit tuple of supported source `files`."""
     findings = _collect_findings(
@@ -121,22 +188,40 @@ def analyze_files(
         low_use_short_function=(
             low_use_short_function or LowUseShortFunctionSettings()
         ),
+        clone_filter=clone_filter,
+        rule_sets=rule_sets,
+        strict_sg=strict_sg,
     )
     flags = _build_flags(findings)
     return AnalysisResult(
         flags=flags,
         source_lines_by_file=findings.source_lines_by_file,
+        skipped_files=findings.skipped_files,
     )
 
 
-def _collect_findings(
+def _collect_findings(  # noqa: PLR0913
     files: tuple[Path, ...],
     *,
     include_all: bool,
     disable_sg: bool,
     low_use_short_function: LowUseShortFunctionSettings,
+    clone_filter: CloneFilter,
+    rule_sets: tuple[RuleSet, ...],
+    strict_sg: bool,
 ) -> Findings:
     sources = _parse_sources(files)
+    clones, overflowed = detect_clones_with_skips(
+        sources.parsed_files,
+        clone_filter=clone_filter,
+    )
+    if overflowed:
+        sources = _parse_sources(tuple(f for f in files if f not in overflowed))
+        clones, _ = detect_clones_with_skips(
+            sources.parsed_files,
+            clone_filter=clone_filter,
+        )
+    skipped_files = tuple(sorted({*sources.skipped_files, *overflowed}))
     project = build_project(tuple(parsed.module for parsed in sources.parsed_files))
     functions = _function_symbols(tuple(project.symbols_by_qualified_name.values()))
     structural_findings = run_rules(
@@ -149,9 +234,11 @@ def _collect_findings(
         structural_findings,
         include_all=include_all,
         disable_sg=disable_sg,
+        rule_sets=rule_sets,
+        strict_sg=strict_sg,
     )
     return Findings(
-        clones=detect_clones(sources.parsed_files),
+        clones=clones,
         ast_hits=ast_hits,
         structural_findings=filtered_structural_findings,
         functions=functions,
@@ -159,6 +246,7 @@ def _collect_findings(
         sloc_lines_by_file=sources.sloc_lines_by_file,
         source_lines_by_file=sources.source_lines_by_file,
         syntax_by_language=sources.syntax_by_language,
+        skipped_files=skipped_files,
     )
 
 
@@ -169,11 +257,13 @@ def _parse_sources(files: tuple[Path, ...]) -> ParsedSources:
     source_by_file: dict[Path, str] = {}
     source_lines_by_file: dict[Path, tuple[str, ...]] = {}
     language_by_file: dict[Path, Language] = {}
+    skipped_files: list[Path] = []
     tree_counts: Counter[Language] = Counter()
     node_counts: Counter[Language] = Counter()
 
     for file_path in files:
         if (parsed_source := _parse_source_file(file_path)) is None:
+            skipped_files.append(file_path)
             continue
         source, parsed = parsed_source
         language = parsed.module.language
@@ -195,6 +285,7 @@ def _parse_sources(files: tuple[Path, ...]) -> ParsedSources:
         source_lines_by_file=source_lines_by_file,
         language_by_file=language_by_file,
         syntax_by_language=_syntax_summaries(tree_counts, node_counts),
+        skipped_files=tuple(skipped_files),
     )
 
 
@@ -233,22 +324,40 @@ def _parse_source_file(file_path: Path) -> tuple[str, ParsedFile] | None:
             error=str(exc),
         )
         return None
+    except RecursionError:
+        logger.warning(
+            "file overflowed recursion while parsing, skipping",
+            file=str(file_path),
+        )
+        return None
 
 
-def _run_and_filter_rules(
+def _run_and_filter_rules(  # noqa: PLR0913
     sources: ParsedSources,
     functions: tuple[SymbolIR, ...],
     structural_findings: tuple[RuleFinding, ...],
     *,
     include_all: bool,
     disable_sg: bool,
+    rule_sets: tuple[RuleSet, ...],
+    strict_sg: bool,
 ) -> tuple[tuple[AstGrepHit, ...], tuple[RuleFinding, ...]]:
     with rules_file() as rules_path:
         ast_hits, thresholds = _run_ast_grep(
             sources,
             rules_path,
             disable_sg=disable_sg,
+            strict_sg=strict_sg,
         )
+        extra_hits, extra_thresholds = _run_extra_rule_sets(
+            sources,
+            rule_sets,
+            disable_sg=disable_sg,
+            strict_sg=strict_sg,
+        )
+        if extra_hits:
+            ast_hits = _sorted_ast_hits((*ast_hits, *extra_hits))
+        thresholds = {**thresholds, **extra_thresholds}
         if include_all:
             return ast_hits, structural_findings
 
@@ -285,6 +394,7 @@ def _run_ast_grep(
     rules_path: Path,
     *,
     disable_sg: bool,
+    strict_sg: bool = False,
 ) -> tuple[tuple[AstGrepHit, ...], dict[str, int]]:
     python_files = _files_by_language(sources, Language.PYTHON)
     if disable_sg or not python_files:
@@ -292,11 +402,63 @@ def _run_ast_grep(
 
     thresholds = load_thresholds(rules_path)
     rule_severities = load_rule_severities(rules_path)
+    runner = run_sg_strict if strict_sg else run_sg
     ast_hits = _with_ast_hit_severities(
-        run_sg(python_files, rules_path),
+        runner(python_files, rules_path),
         rule_severities,
     )
     return ast_hits, thresholds
+
+
+def _run_extra_rule_sets(
+    sources: ParsedSources,
+    rule_sets: tuple[RuleSet, ...],
+    *,
+    disable_sg: bool,
+    strict_sg: bool,
+) -> tuple[tuple[AstGrepHit, ...], dict[str, int]]:
+    """Run each non-Python rule set in its own `sg` process."""
+    hits: tuple[AstGrepHit, ...] = ()
+    thresholds: dict[str, int] = {}
+    for rule_set in rule_sets:
+        if rule_set is RuleSet.PYTHON or disable_sg:
+            continue
+
+        languages = _RULE_SET_LANGUAGES[rule_set]
+        files = tuple(
+            file_path
+            for file_path in sources.source_lines_by_file
+            if sources.language_by_file.get(file_path) in languages
+        )
+        if not files:
+            continue
+
+        with rules_file(rule_set) as rules_path:
+            if rules_path.stat().st_size == 0:
+                continue
+
+            runner = run_sg_strict if strict_sg else run_sg
+            raw_hits = runner(files, rules_path)
+            try:
+                severities = load_rule_severities(rules_path)
+                set_thresholds = load_thresholds(rules_path)
+            except yaml.YAMLError:
+                # Malformed rule text: sg already failed (and warned, or raised
+                # under strict mode), so there are no hits to classify.
+                continue
+            hits = (*hits, *_with_ast_hit_severities(raw_hits, severities))
+            thresholds.update(set_thresholds)
+
+    return hits, thresholds
+
+
+def _sorted_ast_hits(hits: tuple[AstGrepHit, ...]) -> tuple[AstGrepHit, ...]:
+    return tuple(
+        sorted(
+            hits,
+            key=lambda hit: (hit.file.as_posix(), hit.line, hit.col, hit.rule_id),
+        ),
+    )
 
 
 def _files_by_language(

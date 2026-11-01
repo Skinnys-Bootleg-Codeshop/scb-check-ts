@@ -1,0 +1,73 @@
+id: ts-as-any
+language: typescript
+severity: warning
+message: '`x as any` - give the value its real type, or narrow it with a type guard'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  pattern: $E as any
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-non-null-chain
+language: typescript
+severity: warning
+message: '`a!.b!.c` - chained non-null assertions; check once with a guard or optional chaining'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: member_expression
+  has:
+    field: object
+    kind: non_null_expression
+    has:
+      kind: member_expression
+      has:
+        field: object
+        kind: non_null_expression
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-ts-suppress
+language: typescript
+severity: warning
+message: '`@ts-ignore` / `@ts-nocheck` - fix the type error; use `@ts-expect-error` with a reason if it must stay'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  all:
+  - any:
+    - kind: lexical_declaration
+    - kind: expression_statement
+    - kind: return_statement
+    - kind: import_statement
+    - kind: export_statement
+    - kind: type_alias_declaration
+    - kind: interface_declaration
+  - regex: ^[^\n]+$
+  - follows:
+      stopBy: neighbor
+      kind: comment
+      regex: ^//\s*@ts-(ignore|nocheck)
+---
+id: ts-as-unknown-as
+language: typescript
+severity: warning
+message: '`x as unknown as T` - double cast hides a type error; fix the types or validate the value'
+metadata:
+  weight: 5
+  category: slop
+  source: slopcheck-deslop
+rule:
+  any:
+  - pattern: $E as unknown as $T
+  - pattern: ($E as unknown) as $T
+  not:
+    any:
+    - regex: (?:[^\n]*\n){12,}
+    - inside:
+        kind: return_statement
+        stopBy: neighbor

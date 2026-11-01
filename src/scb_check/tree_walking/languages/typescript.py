@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import tree_sitter_typescript
 
 from scb_check.tree_walking.languages.generic import GenericTreeSitterParser
@@ -57,6 +59,12 @@ TYPESCRIPT_CONFIG = TreeSitterLanguageConfig(
     literal_node_types=_TYPESCRIPT_LITERALS,
 )
 
+TSX_CONFIG = replace(
+    TYPESCRIPT_CONFIG,
+    language=Language.TSX,
+    tree_sitter_language=tree_sitter_typescript.language_tsx,
+)
+
 
 class TypeScriptParser(GenericTreeSitterParser):
     """Parse TypeScript source into minimal IR."""
@@ -64,3 +72,11 @@ class TypeScriptParser(GenericTreeSitterParser):
     def __init__(self) -> None:
         """Initialize the TypeScript parser."""
         super().__init__(TYPESCRIPT_CONFIG)
+
+
+class TsxParser(GenericTreeSitterParser):
+    """Parse TSX source into minimal IR."""
+
+    def __init__(self) -> None:
+        """Initialize the TSX parser."""
+        super().__init__(TSX_CONFIG)
