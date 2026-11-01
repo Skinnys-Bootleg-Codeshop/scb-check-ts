@@ -88,6 +88,23 @@ def _delta(
     return (json.loads(result.stdout) if fmt and expect == 0 else {}), result.stderr
 
 
+def test_delta_relative_exclude_applies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repo-relative --exclude holds when the temp directory is under a symlink."""
+    link = tmp_path / "linked-tmp"
+    real = tmp_path / "real-tmp"
+    real.mkdir()
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("TMPDIR", str(link))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    repo, _ = _repo(tmp_path, {"lib/a.ts": GOOD})
+    _commit(repo, {"lib/vendor/b.ts": BAD})
+    payload, _err = _delta(repo, monkeypatch, "--exclude", "lib/vendor/**", "lib")
+    assert payload["new_flagged"] == []
+
+
 def test_delta_dirty_tree_scores_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

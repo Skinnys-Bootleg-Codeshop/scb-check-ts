@@ -258,6 +258,7 @@ def _score_side(  # noqa: PLR0913
 ) -> ScanSnapshot:
     if not paths:
         return empty_snapshot()
+    dest = dest.resolve()  # /var is a symlink to /private/var on macOS; the walker resolves paths
     delta_git.export_tree(root, sha, (*paths, *_ancestor_ignores(root, sha, paths)), dest)
     config = Config(exclude=exclude, base_dir=dest)
     targets = tuple(dest if p == "." else dest / p for p in paths)
