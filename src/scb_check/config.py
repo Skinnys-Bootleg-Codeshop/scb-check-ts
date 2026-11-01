@@ -6,8 +6,9 @@ import tomllib
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+from scb_check.resources import RuleSet
 from scb_check.rules.settings import LowUseShortFunctionSettings
 
 
@@ -21,6 +22,64 @@ class Config:
     low_use_short_function: LowUseShortFunctionSettings = field(
         default_factory=LowUseShortFunctionSettings,
     )
+    max_file_bytes: int | None = None
+
+
+type CloneFilter = Literal["upstream", "no-expression-bodies", "no-jsx-dominated"]
+
+
+@dataclass(frozen=True, slots=True)
+class ScanProfile:
+    """Named bundle of scan behaviour that sits behind `--profile`."""
+
+    name: str
+    exclude: tuple[str, ...] = ()
+    clone_filter: CloneFilter = "upstream"
+    max_file_bytes: int | None = None
+    rule_sets: tuple[RuleSet, ...] = (RuleSet.PYTHON,)
+
+
+TS_EXCLUDES: tuple[str, ...] = (
+    "**/tests/**",
+    "**/test/**",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/e2e/**",
+    "**/playwright/**",
+    "**/fixtures/**",
+    "**/__fixtures__/**",
+    "**/*-fixture/**",
+    "**/*-fixtures/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/*.stories.ts",
+    "**/*.stories.tsx",
+    "**/*.d.ts",
+    "**/.next/**",
+    "**/.contentlayer/**",
+    "**/out/**",
+    "**/coverage/**",
+    "**/generated/**",
+    "**/__generated__/**",
+    "**/_generated/**",
+    "**/*.generated.ts",
+    "**/*.generated.tsx",
+    "**/*.gen.ts",
+    "**/*.gen.tsx",
+)
+
+PROFILES: dict[str, ScanProfile] = {
+    "upstream": ScanProfile("upstream"),
+    "ts": ScanProfile(
+        "ts",
+        TS_EXCLUDES,
+        "no-jsx-dominated",
+        1_048_576,
+        (RuleSet.PYTHON, RuleSet.TYPESCRIPT),
+    ),
+}
 
 
 class ConfigError(ValueError):  # scbc ignore[empty-exception-subclass]

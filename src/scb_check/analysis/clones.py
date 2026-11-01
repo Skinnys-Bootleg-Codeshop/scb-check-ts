@@ -10,6 +10,8 @@ from operator import attrgetter
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from scb_check.config import CloneFilter
+from scb_check.logging import get_logger
 from scb_check.models import CloneBlock
 from scb_check.tree_walking.dispatch import ParsedFile
 from scb_check.tree_walking.languages.python import python_string_prefix
@@ -27,6 +29,8 @@ from scb_check.tree_walking.languages.registry import (
     literal_node_types_for_language,
 )
 from scb_check.tree_walking.models import Language
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from tree_sitter import Node
@@ -81,6 +85,7 @@ class _CloneScanContext:
     sloc_lines: frozenset[int]
     min_body_statements: int
     language: Language
+    clone_filter: CloneFilter = "upstream"
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,26 +112,33 @@ class CloneCandidate:
 def detect_clones(
     files: tuple[ParsedFile, ...],
     min_body_statements: int = _MIN_BODY_STATEMENTS,
+    clone_filter: CloneFilter = "upstream",
 ) -> tuple[CloneBlock, ...]:
     """Return clone blocks found in parsed source `files`."""
-    candidates = sorted(
-        (
-            candidate
-            for parsed in files
-            if parsed.native_tree is not None
-            for candidate in _iter_clone_candidates(
-                cast("Tree", parsed.native_tree),
-                _CloneScanContext(
-                    file=parsed.file,
-                    source_lines=tuple(parsed.source.splitlines()),
-                    sloc_lines=parsed.module.sloc_lines,
-                    min_body_statements=min_body_statements,
-                    language=parsed.module.language,
-                ),
-            )
-        ),
-        key=attrgetter("group_hash"),
-    )
+    return detect_clones_with_skips(files, min_body_statements, clone_filter)[0]
+
+
+def detect_clones_with_skips(
+    files: tuple[ParsedFile, ...],
+    min_body_statements: int = _MIN_BODY_STATEMENTS,
+    clone_filter: CloneFilter = "upstream",
+) -> tuple[tuple[CloneBlock, ...], tuple[Path, ...]]:
+    """Return clone blocks and the files whose scan overflowed recursion."""
+    overflowed: list[Path] = []
+    raw_candidates: list[CloneCandidate] = []
+    for parsed in files:
+        if parsed.native_tree is None:
+            continue
+        found = _file_clone_candidates(
+            parsed,
+            min_body_statements,
+            clone_filter,
+        )
+        if found is None:
+            overflowed.append(parsed.file)
+            continue
+        raw_candidates.extend(found)
+    candidates = sorted(raw_candidates, key=attrgetter("group_hash"))
 
     clones: list[CloneBlock] = []
     for hash_value, candidates_iter in groupby(
@@ -167,7 +179,32 @@ def detect_clones(
                 ),
             )
 
-    return tuple(clones)
+    return tuple(clones), tuple(overflowed)
+
+
+def _file_clone_candidates(
+    parsed: ParsedFile,
+    min_body_statements: int,
+    clone_filter: CloneFilter,
+) -> tuple[CloneCandidate, ...] | None:
+    try:
+        return _iter_clone_candidates(
+            cast("Tree", parsed.native_tree),
+            _CloneScanContext(
+                file=parsed.file,
+                source_lines=tuple(parsed.source.splitlines()),
+                sloc_lines=parsed.module.sloc_lines,
+                min_body_statements=min_body_statements,
+                language=parsed.module.language,
+                clone_filter=clone_filter,
+            ),
+        )
+    except RecursionError:
+        logger.warning(
+            "clone detection overflowed recursion, skipping file",
+            file=str(parsed.file),
+        )
+        return None
 
 
 def _iter_clone_candidates(
@@ -204,6 +241,8 @@ def _extract_clone_candidate(
     node: Node,
     context: _CloneScanContext,
 ) -> CloneCandidate | None:
+    if _excluded_by_filter(node, context):
+        return None
     start_line = node.start_point[0] + 1
     end_line = node.end_point[0] + 1
     body_statement_count = max(
@@ -224,6 +263,44 @@ def _extract_clone_candidate(
         group_hash=_hash_ast_subtree(node, context.language),
         first_lines=context.source_lines[start_line - 1 : preview_end_line],
     )
+
+
+_FILTERED_LANGUAGES = frozenset({Language.TYPESCRIPT, Language.TSX})
+_JSX_DOMINANCE_SHARE = 0.5
+
+
+def _excluded_by_filter(node: Node, context: _CloneScanContext) -> bool:
+    """Return whether the profile's clone filter rejects `node`."""
+    if (
+        context.clone_filter == "upstream"
+        or context.language not in _FILTERED_LANGUAGES
+    ):
+        return False
+    if _is_expression_bodied_arrow(node):
+        return True
+    return (
+        context.clone_filter == "no-jsx-dominated" and _is_jsx_dominated(node)
+    )
+
+
+def _is_expression_bodied_arrow(node: Node) -> bool:
+    if node.type != "arrow_function":
+        return False
+    body = node.child_by_field_name("body")
+    return body is not None and body.type != "statement_block"
+
+
+def _is_jsx_dominated(node: Node) -> bool:
+    total = 0
+    jsx = 0
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        total += 1
+        if current.type.startswith("jsx_"):
+            jsx += 1
+        stack.extend(current.children)
+    return jsx / total > _JSX_DOMINANCE_SHARE
 
 
 def _body_containers(node: Node, language: Language) -> tuple[Node, ...]:

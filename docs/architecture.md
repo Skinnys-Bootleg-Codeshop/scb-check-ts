@@ -14,7 +14,7 @@ Per file, flagged lines are the union of:
 - Python `ast-grep` lines from bundled or extra YAML rules,
 - structural rule lines from Python rule classes.
 
-Rust, JavaScript, TypeScript, Zig, Haskell, and C++ currently have no bundled slop-pattern rules, so their verbosity contribution is clone LOC only.
+Rust, JavaScript, Zig, Haskell, and C++ have no bundled slop-pattern rules, so their verbosity contribution is clone LOC only. TypeScript and TSX get ast-grep rules from `resources/slop_rules_typescript/` (and TypeScript entries of `SCB_CHECK_EXTRA_SLOP_RULES`) only under `--profile ts`; with no profile they too are clone LOC only.
 
 That union is intersected with `SLOC`, then divided by total `SLOC`. A line flagged by more than one source counts once.
 
@@ -98,8 +98,8 @@ CLI (`cli.py` / `commands/`)
 ## Design constraints
 
 - Line numbers are 1-indexed after tree-sitter data leaves the parser layer.
-- Supported scan targets are Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`).
-- `ast-grep`, structural rules, and source directives are Python-only until language-specific rule sets exist.
+- Supported scan targets are Python (`.py`, `.pyw`), Rust (`.rs`), JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (`.ts`), TSX (`.tsx`), Zig (`.zig`), Haskell (`.hs`), and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`).
+- Structural rules and source directives are Python-only. `ast-grep` rules are per language: `resources/__init__.py` defines `RuleSet.PYTHON` (always on) and `RuleSet.TYPESCRIPT` (`--profile ts`). Each set runs in its own `sg` process (batches of at most 1000 files) so one broken rule file cannot silence another set; `--strict-sg` turns an `sg` failure into exit `2`.
 - Parser-native data may live on parsed file artifacts for clone detection, but not in `ModuleIR`, `ProjectIR`, or structural rules.
 - `ast-grep` failure is non-fatal. `scb-check` tries a global `sg` binary first, then falls back to package-managed ast-grep executables next to Python if global `sg` is missing or fails. If no ast-grep binary succeeds, `OSError`, non-zero exits, or invalid JSON return no hits.
 - Source ignores and structural rules share one rule ID namespace, so `scbc ignore[...]` is never ambiguous.
@@ -121,3 +121,5 @@ Change these only with tests and documentation updates because they move user-vi
 - Extra `ast-grep` rules: set `SCB_CHECK_EXTRA_SLOP_RULES` to a `:`-separated list of YAML files.
 - Structural rules: add a rule class in `rules/`, register it in `rules/registry.py`, and keep it on IR plus `RuleContext`.
 - New CLI commands: add command wiring under `commands/` and register from `cli.py`.
+
+- `ScanProfile` (`config.py`) bundles scan behaviour behind `--profile`: `upstream` (default, pristine behaviour) and `ts` (test/generated/fixture excludes, a 1 MiB file cap and a clone filter: `no-jsx-dominated`, which drops expression-bodied arrow clone candidates in `.ts` and `.tsx`; see `docs/spikes/2026-11-tsx-spike.md`). Profiles are scoring-sensitive: with no flag, scores must equal upstream (`tests/golden/`).

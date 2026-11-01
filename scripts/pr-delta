@@ -1,0 +1,4 @@
+#!/bin/sh
+# Score a pull request against its base. Run from the repo being scored.
+here=$(cd "$(dirname "$0")/.." && pwd -P)
+exec uv run --project "$here" --frozen scb-check delta "$@"

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Regenerate the golden JSON from pristine upstream (a8618228), not from this tree.
+set -eu
+BASE=a8618228939def726c2ec48b354693e5aa1999d5
+here=$(cd "$(dirname "$0")/.." && pwd -P)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/scb-make-goldens.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT INT TERM
+git -C "$here" archive "$BASE" | tar -x -C "$tmp"
+uv sync --frozen --project "$tmp" >/dev/null 2>&1
+out="$here/tests/fixtures/golden/expected"
+mkdir -p "$out"
+run() {
+    # $1 name, $2 root, $3 suffix
+    uv run --frozen --project "$tmp" python "$here/scripts/golden_dump.py" \
+        --root "$2" --suffix "$3" --out "$out/$1.json"
+}
+run python_scb_src "$here/tests/fixtures/golden/python/scb_src" .py
+run python_corpus "$here/tests/fixtures/golden/python/corpus" .py
+run ts "$here/tests/fixtures/golden/ts" .ts
+echo "goldens written to $out"

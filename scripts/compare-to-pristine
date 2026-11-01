@@ -1,0 +1,41 @@
+#!/bin/sh
+# Compare this tree's analysis of PATH with pristine upstream's.
+# Usage: compare-to-pristine PATH [--suffix .ts]
+set -eu
+BASE=a8618228939def726c2ec48b354693e5aa1999d5
+here=$(cd "$(dirname "$0")/.." && pwd -P)
+path=$1
+shift
+suffix=.ts
+if [ "${1:-}" = "--suffix" ]; then suffix=$2; fi
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/scb-pristine-a8618228"
+if [ -e "$cache" ] && [ ! -O "$cache" ]; then
+    echo "compare-to-pristine: $cache is not owned by you" >&2
+    exit 2
+fi
+if [ ! -f "$cache/.pristine-ok" ]; then
+    rm -rf "$cache"
+    mkdir -p "$cache"
+    chmod 700 "$cache"
+    git -C "$here" archive "$BASE" | tar -x -C "$cache"
+    uv sync --frozen --project "$cache" >/dev/null 2>&1
+    touch "$cache/.pristine-ok"
+fi
+work=$(mktemp -d "${TMPDIR:-/tmp}/scb-compare.XXXXXX")
+trap 'rm -rf "$work"' EXIT INT TERM
+git -C "$here" diff --exit-code "$BASE" -- src/scb_check/reporting/score.py
+uv run --frozen --project "$cache" python "$here/scripts/golden_dump.py" \
+    --root "$path" --suffix "$suffix" --out "$work/pristine.json"
+uv run --frozen --project "$here" python "$here/scripts/golden_dump.py" \
+    --root "$path" --suffix "$suffix" --out "$work/current.json"
+if cmp -s "$work/pristine.json" "$work/current.json"; then
+    echo identical
+else
+    uv run --frozen --project "$here" python - "$work/pristine.json" "$work/current.json" <<'PY'
+import json, sys
+a, b = (json.load(open(p)) for p in sys.argv[1:3])
+bad = [k for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+print("differ:", ", ".join(bad))
+PY
+    exit 1
+fi

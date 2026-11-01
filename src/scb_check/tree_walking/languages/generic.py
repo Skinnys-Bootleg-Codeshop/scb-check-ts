@@ -44,6 +44,7 @@ _LANGUAGE_NAME_BY_VALUE = {
     Language.HASKELL: "Haskell",
     Language.JAVASCRIPT: "JavaScript",
     Language.RUST: "Rust",
+    Language.TSX: "TSX",
     Language.TYPESCRIPT: "TypeScript",
     Language.ZIG: "Zig",
 }
@@ -580,27 +581,29 @@ def _cyclomatic_increment(node: Node, config: TreeSitterLanguageConfig) -> int:
     )
 
 
+def _children_cognitive(
+    node: Node,
+    config: TreeSitterLanguageConfig,
+    nesting: int,
+) -> int:
+    return sum(
+        _cognitive_for_node(child, config, nesting=nesting) for child in node.children
+    )
+
+
 def _cognitive_for_node(
     node: Node,
     config: TreeSitterLanguageConfig,
     *,
     nesting: int,
 ) -> int:
-    child_score = sum(
-        _cognitive_for_node(child, config, nesting=nesting)
-        for child in node.children
-    )
     if _is_boolean_operation(node, config):
-        return 1 + child_score
+        return 1 + _children_cognitive(node, config, nesting)
     if node.type in config.jump_node_types:
         return 1
     if node.type in config.cognitive_flow_break_node_types:
-        nested_score = sum(
-            _cognitive_for_node(child, config, nesting=nesting + 1)
-            for child in node.children
-        )
-        return 1 + nesting + nested_score
-    return child_score
+        return 1 + nesting + _children_cognitive(node, config, nesting + 1)
+    return _children_cognitive(node, config, nesting)
 
 
 def _is_boolean_operation(node: Node, config: TreeSitterLanguageConfig) -> bool:
