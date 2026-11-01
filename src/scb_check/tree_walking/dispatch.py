@@ -14,6 +14,7 @@ from scb_check.tree_walking.languages.haskell import HaskellParser
 from scb_check.tree_walking.languages.javascript import JavaScriptParser
 from scb_check.tree_walking.languages.python import PythonParser
 from scb_check.tree_walking.languages.rust import RustParser
+from scb_check.tree_walking.languages.typescript import TsxParser
 from scb_check.tree_walking.languages.typescript import TypeScriptParser
 from scb_check.tree_walking.languages.zig import ZigParser
 from scb_check.tree_walking.models import Language
@@ -47,6 +48,7 @@ DEFAULT_EXTENSION_LANGUAGES: ExtensionLanguages = {
     ".pyw": (Language.PYTHON,),
     ".rs": (Language.RUST,),
     ".ts": (Language.TYPESCRIPT,),
+    ".tsx": (Language.TSX,),
     ".zig": (Language.ZIG,),
 }
 SUPPORTED_SOURCE_SUFFIXES = frozenset(DEFAULT_EXTENSION_LANGUAGES)
@@ -58,6 +60,7 @@ _DEFAULT_PARSERS: ParserRegistry = {
         JavaScriptParser(),
         PythonParser(),
         RustParser(),
+        TsxParser(),
         TypeScriptParser(),
         ZigParser(),
     )

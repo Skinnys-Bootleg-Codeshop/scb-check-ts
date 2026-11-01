@@ -48,6 +48,7 @@ _GENERIC_LANGUAGES = frozenset(
         Language.HASKELL,
         Language.JAVASCRIPT,
         Language.RUST,
+        Language.TSX,
         Language.TYPESCRIPT,
         Language.ZIG,
     },

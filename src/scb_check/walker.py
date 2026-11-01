@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scb_check.config import Config
+from scb_check.logging import get_logger
 from scb_check.tree_walking.dispatch import SUPPORTED_SOURCE_SUFFIXES
+
+logger = get_logger(__name__)
 
 _PYTHON_SUFFIXES = frozenset({".py"})
 
@@ -184,7 +187,26 @@ def _is_discoverable_source_file(
             include_ignored
             or not _is_gitignored(path, is_dir=False, rules=gitignore_rules)
         )
+        and _within_size_cap(path, config)
     )
+
+
+def is_scannable(path: Path, config: Config) -> bool:
+    """Return whether `path` passes `config`'s excludes and size cap."""
+    return not _is_user_excluded(path, config) and _within_size_cap(path, config)
+
+
+def _within_size_cap(path: Path, config: Config) -> bool:
+    if config.max_file_bytes is None:
+        return True
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return True
+    if size <= config.max_file_bytes:
+        return True
+    logger.warning("file exceeds size cap, skipping", file=str(path), bytes=size)
+    return False
 
 
 def _ancestor_gitignore_rules(root: Path, config: Config) -> tuple[_GitIgnoreRule, ...]:

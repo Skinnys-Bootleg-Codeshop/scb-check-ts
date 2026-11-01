@@ -1,0 +1,27 @@
+id: ts-catch-rethrow
+language: typescript
+severity: warning
+message: '`catch (e) { throw e; }` does nothing - remove the try/catch'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: catch_clause
+  pattern:
+    context: try { x } catch ($E) { throw $E; }
+    selector: catch_clause
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-inline-error-message
+language: typescript
+severity: warning
+message: '`e instanceof Error ? e.message : String(e)` repeated inline - extract one `errorMessage()` helper'
+metadata:
+  weight: 5
+  category: slop
+  source: slopcheck-deslop
+rule:
+  pattern: '$X instanceof Error ? $X.message : String($X)'
+  not:
+    regex: (?:[^\n]*\n){12,}

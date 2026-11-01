@@ -1,0 +1,145 @@
+---
+id: ts-nested-ternary
+language: typescript
+severity: warning
+message: 'Nested ternary - use `if`/`else`, a lookup object or an early return'
+metadata:
+  weight: 5
+  category: slop
+  source: slopcheck-deslop
+rule:
+  any:
+  - pattern: '$A ? $B ? $C : $D : $E'
+  - pattern: '$A ? $B : $C ? $D : $E'
+  - pattern: '$A ? ($B ? $C : $D) : $E'
+  - pattern: '$A ? $B : ($C ? $D : $E)'
+  not:
+    any:
+    - regex: (?:[^\n]*\n){12,}
+    - has:
+        stopBy: end
+        kind: unary_expression
+        regex: ^-1$
+---
+id: ts-self-ternary
+language: typescript
+severity: warning
+message: '`a ? a : b` - use `a || b`'
+metadata:
+  weight: 5
+  category: slop
+  source: slopcheck-deslop
+constraints:
+  A:
+    regex: ^[\w$.]+$
+rule:
+  pattern: '$A ? $A : $B'
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-bool-ternary
+language: typescript
+severity: warning
+message: '`c ? true : false` - use `Boolean(c)` (or `c` when it is already boolean); `c ? false : true` is `!c`'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  any:
+  - pattern: '$C ? true : false'
+  - pattern: '$C ? false : true'
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-if-return-bool
+language: typescript
+severity: warning
+message: '`if (c) return true; return false;` - return the condition, as `Boolean(c)` when it is not already boolean (`!c` when the values are swapped)'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: if_statement
+  any:
+  - regex: ^if \([^\n]*\)\s*(\{\s*)?return true;\s*\}?$
+    precedes:
+      stopBy: neighbor
+      kind: return_statement
+      regex: ^return false;$
+  - regex: ^if \([^\n]*\)\s*(\{\s*)?return false;\s*\}?$
+    precedes:
+      stopBy: neighbor
+      kind: return_statement
+      regex: ^return true;$
+  not:
+    any:
+    - regex: (?:[^\n]*\n){12,}
+    - follows:
+        stopBy: neighbor
+        kind: if_statement
+---
+id: ts-else-after-return
+language: typescript
+severity: warning
+message: '`else` after a branch that returns - drop the `else` and dedent (keep the braces if the block declares a name the outer scope also uses)'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: else_clause
+  inside:
+    kind: if_statement
+    has:
+      field: consequence
+      any:
+      - kind: return_statement
+      - kind: statement_block
+        has:
+          kind: return_statement
+          nthChild:
+            position: 1
+            reverse: true
+  not:
+    regex: (?:[^\n]*\n){12,}
+---
+id: ts-optional-chain-long
+language: typescript
+severity: warning
+message: 'Three or more `?.` in one chain - check the shape once, or give the data a type that cannot be missing'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  kind: member_expression
+  has: {kind: optional_chain}
+  all:
+  - has:
+      field: object
+      kind: member_expression
+      all:
+      - has: {kind: optional_chain}
+      - has:
+          field: object
+          kind: member_expression
+          has: {kind: optional_chain}
+  not:
+    any:
+    - inside:
+        kind: member_expression
+    - regex: (?:[^\n]*\n){12,}
+---
+id: ts-null-and-undefined-check
+language: typescript
+severity: warning
+message: 'Null and undefined checked separately - `x != null` (present) or `x == null` (absent) covers both'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  any:
+  - pattern: $X !== null && $X !== undefined
+  - pattern: $X !== undefined && $X !== null
+  - pattern: $X === null || $X === undefined
+  - pattern: $X === undefined || $X === null
+  not:
+    regex: (?:[^\n]*\n){12,}

@@ -1,0 +1,19 @@
+---
+id: ts-narration-comment
+language: typescript
+severity: warning
+message: 'Comment restates the next line - delete it, or say why instead of what'
+metadata:
+  weight: 5
+  category: slop
+rule:
+  all:
+  - any:
+    - kind: lexical_declaration
+    - kind: expression_statement
+    - kind: return_statement
+  - regex: ^[^\n]+$
+  - follows:
+      stopBy: neighbor
+      kind: comment
+      regex: ^//\s*(Get|Set|Check|Loop|Initialize|Return|Create|Call|Define|Update|Handle)\b

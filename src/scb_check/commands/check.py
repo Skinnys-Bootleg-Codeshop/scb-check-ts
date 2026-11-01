@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict, Unpack
 
@@ -12,6 +13,7 @@ import click
 import typer
 from typer.core import TyperCommand
 
+from scb_check.config import PROFILES
 from scb_check.config import Config
 from scb_check.config import ConfigError
 from scb_check.config import load_config
@@ -20,6 +22,7 @@ from scb_check.models import Flags
 from scb_check.pipeline import AnalysisResult
 from scb_check.pipeline import IgnoreDirectiveError
 from scb_check.pipeline import analyze
+from scb_check.pipeline import analyze_paths
 from scb_check.reporting.render import render_flags
 from scb_check.reporting.score import compute_report
 
@@ -157,9 +160,9 @@ def _min_duplicate_lines(ctx: typer.Context) -> int | None:
 CHECK_COMMAND_CLASS = CheckCommand
 
 
-def check(
+def check(  # noqa: PLR0913
     ctx: typer.Context,
-    path: Annotated[Path, typer.Argument()],
+    paths: Annotated[list[Path], typer.Argument()],
     *,
     config_path: Annotated[
         Path | None,
@@ -181,12 +184,41 @@ def check(
             help="Include gitignored files, ignored rule findings, lower-severity ast-grep findings, and boundary-suppressed ast-grep findings.",
         ),
     ] = False,
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            click_type=click.Choice(tuple(PROFILES)),
+            help="Scan profile: upstream (default) or ts (TypeScript repos).",
+        ),
+    ] = "upstream",
+    exclude: Annotated[
+        list[str] | None,
+        typer.Option("--exclude", help="Extra exclude glob (repeatable)."),
+    ] = None,
+    strict_sg: Annotated[
+        bool,
+        typer.Option(
+            "--strict-sg",
+            help="Exit 2 when ast-grep fails instead of scoring without its hits.",
+        ),
+    ] = False,
 ) -> None:
-    """Run analysis for `path` and emit the selected output format."""
+    """Run analysis for `paths` and emit the selected output format."""
     output_format = _resolve_output_or_exit(ctx)
     configure_logging(verbosity)
-    config, result = _load_and_analyze(ctx, path, config_path, include_all=include_all)
-    _ensure_files_parsed(result, path)
+    config, result = _load_and_analyze(
+        ctx,
+        tuple(paths),
+        config_path,
+        include_all=include_all,
+        profile=profile,
+        exclude=tuple(exclude or ()),
+        strict_sg=strict_sg,
+    )
+    _ensure_files_parsed(result, ", ".join(str(path) for path in paths))
+    if result.skipped_files:
+        typer.echo(f"skipped {len(result.skipped_files)} files", err=True)
 
     flags = result.flags
     if output_format == "json":
@@ -206,28 +238,42 @@ def _resolve_output_or_exit(ctx: typer.Context) -> Literal["human", "json"]:
         raise typer.Exit(code=2) from exc
 
 
-def _load_and_analyze(
+def _load_and_analyze(  # noqa: PLR0913
     ctx: typer.Context,
-    path: Path,
+    paths: tuple[Path, ...],
     config_path: Path | None,
     *,
     include_all: bool,
+    profile: str,
+    exclude: tuple[str, ...],
+    strict_sg: bool = False,
 ) -> tuple[Config, AnalysisResult]:
+    disable_sg = bool(ctx.meta.get(DISABLE_SG_KEY, False))
     try:
         config = load_config(config_path, Path.cwd())
-        result = analyze(
-            path,
-            config,
-            include_all=include_all,
-            disable_sg=bool(ctx.meta.get(DISABLE_SG_KEY, False)),
-        )
+        if len(paths) == 1 and profile == "upstream" and not exclude and not strict_sg:
+            result = analyze(
+                paths[0],
+                config,
+                include_all=include_all,
+                disable_sg=disable_sg,
+            )
+        else:
+            result = analyze_paths(
+                paths,
+                replace(config, exclude=(*config.exclude, *exclude)),
+                profile=PROFILES[profile],
+                include_all=include_all,
+                disable_sg=disable_sg,
+                strict_sg=strict_sg,
+            )
     except (ConfigError, IgnoreDirectiveError, OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
     return config, result
 
 
-def _ensure_files_parsed(result: AnalysisResult, path: Path) -> None:
+def _ensure_files_parsed(result: AnalysisResult, path: str) -> None:
     if not result.flags.lines.total_loc_by_file:
         typer.echo(f"no supported source files could be parsed at {path}", err=True)
         raise typer.Exit(code=2)

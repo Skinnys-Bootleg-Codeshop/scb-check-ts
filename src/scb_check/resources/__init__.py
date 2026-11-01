@@ -7,6 +7,7 @@ from collections.abc import Callable
 from collections.abc import Iterator
 from collections.abc import Mapping
 from contextlib import contextmanager
+from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -16,9 +17,18 @@ import yaml
 
 _RULES_PACKAGE = "scb_check.resources"
 _RULES_DIR_NAME = "slop_rules"
+_TS_RULES_DIR_NAME = "slop_rules_typescript"
 _EXTRA_RULES_ENV = "SCB_CHECK_EXTRA_SLOP_RULES"
+_TS_LANGUAGES = frozenset({"typescript", "ts", "tsx"})
 type RuleSeverity = Literal["info", "warning", "critical"]
 type RuleDocument = dict[str, object]
+
+
+class RuleSet(StrEnum):
+    """Bundled ast-grep rule sets, each run in its own `sg` process."""
+
+    PYTHON = "python"
+    TYPESCRIPT = "typescript"
 
 
 def _rule_file_names() -> tuple[str, ...]:
@@ -68,14 +78,96 @@ def _extra_rules() -> tuple[Path, ...]:
     return tuple(existing)
 
 
-def rule_texts() -> Iterator[tuple[str, str]]:
-    """Yield bundled and environment-provided ast-grep rule text."""
+def rule_texts(rule_set: RuleSet = RuleSet.PYTHON) -> Iterator[tuple[str, str]]:
+    """Yield bundled and environment-provided ast-grep rule text for `rule_set`."""
+    if rule_set is RuleSet.TYPESCRIPT:
+        yield from _typescript_rule_texts()
+        return
+
     rules_dir = resources.files(_RULES_PACKAGE).joinpath(_RULES_DIR_NAME)
     for name in _rule_file_names():
         yield name, rules_dir.joinpath(name).read_text(encoding="utf-8")
 
     for path in _extra_rules():
-        yield path.name, path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
+        try:
+            documents = _rule_documents_from_text(text)
+        except yaml.YAMLError:
+            # Unclassifiable: keep upstream behaviour (sg reports the error).
+            yield path.name, text
+            continue
+        kept = tuple(
+            document for document in documents if not _is_typescript_rule(document)
+        )
+        # TypeScript extras run in their own `sg` process, so a broken one
+        # cannot silence the Python rules.
+        if len(kept) == len(documents):
+            yield path.name, text
+        elif kept:
+            yield path.name, _dump(kept)
+
+
+def _is_typescript_rule(document: RuleDocument) -> bool:
+    return str(document.get("language", "")).lower() in _TS_LANGUAGES
+
+
+def _dump(documents: tuple[RuleDocument, ...]) -> str:
+    return "".join(
+        "---\n" + yaml.safe_dump(document, sort_keys=False) for document in documents
+    )
+
+
+def is_clean_rule_text(text: str) -> bool:
+    """Return whether `text` parses as YAML mappings only."""
+    try:
+        return all(
+            isinstance(document, Mapping) or document is None
+            for document in yaml.safe_load_all(text)
+        )
+    except yaml.YAMLError:
+        return False
+
+
+def _typescript_rule_texts() -> Iterator[tuple[str, str]]:
+    rules_dir = resources.files(_RULES_PACKAGE).joinpath(_TS_RULES_DIR_NAME)
+    if rules_dir.is_dir():
+        for name in sorted(
+            entry.name for entry in rules_dir.iterdir() if entry.name.endswith(".yaml")
+        ):
+            text = rules_dir.joinpath(name).read_text(encoding="utf-8")
+            if not is_clean_rule_text(text):
+                # Verbatim, so ast-grep rejects it and `--strict-sg` exits 2.
+                yield name, text
+                continue
+            rendered = _with_tsx_twins(_rule_documents_from_text(text))
+            if rendered:
+                yield name, rendered
+
+    for path in _extra_rules():
+        try:
+            all_documents = _rule_documents_from_text(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        documents = tuple(
+            document for document in all_documents if _is_typescript_rule(document)
+        )
+        rendered = _with_tsx_twins(documents)
+        if rendered:
+            yield path.name, rendered
+
+
+def _with_tsx_twins(documents: tuple[RuleDocument, ...]) -> str:
+    emitted: list[RuleDocument] = []
+    for document in documents:
+        emitted.append(document)
+        metadata = _rule_document(document.get("metadata")) or {}
+        if (
+            str(document.get("language", "")).lower() in {"typescript", "ts"}
+            and metadata.get("no_tsx_twin") is not True
+        ):
+            emitted.append({**document, "language": "tsx"})
+
+    return _dump(tuple(emitted))
 
 
 def find_rule_document(rule_id: str) -> RuleDocument | None:
@@ -83,7 +175,8 @@ def find_rule_document(rule_id: str) -> RuleDocument | None:
     return next(
         (
             document
-            for _, text in rule_texts()
+            for rule_set in RuleSet
+            for _, text in rule_texts(rule_set)
             for document in _rule_documents_from_text(text)
             if document.get("id") == rule_id
         ),
@@ -182,15 +275,15 @@ def _threshold(document: RuleDocument) -> tuple[str, int] | None:
 
 
 @contextmanager
-def rules_file() -> Iterator[Path]:
-    """Write all active ast-grep rules to a temporary YAML file."""
+def rules_file(rule_set: RuleSet = RuleSet.PYTHON) -> Iterator[Path]:
+    """Write all active ast-grep rules of `rule_set` to a temporary YAML file."""
     with NamedTemporaryFile(
         mode="w",
         suffix=".yaml",
         delete=False,
         encoding="utf-8",
     ) as tmp:
-        for _, text in rule_texts():
+        for _, text in rule_texts(rule_set):
             tmp.write(text)
             if not text.endswith("\n"):
                 tmp.write("\n")
