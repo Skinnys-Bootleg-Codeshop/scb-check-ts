@@ -85,7 +85,7 @@ def delta(  # noqa: PLR0913
     ] = "md",
     max_lines: Annotated[
         int,
-        typer.Option("--max-lines", min=0, help="Cap on listed flagged lines."),
+        typer.Option("--max-lines", min=0, help="Cap on flagged lines listed in Markdown output; JSON lists all."),
     ] = 50,
     max_seconds: Annotated[
         int,

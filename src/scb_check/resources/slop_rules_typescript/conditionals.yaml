@@ -131,7 +131,7 @@ rule:
 id: ts-null-and-undefined-check
 language: typescript
 severity: warning
-message: 'Null and undefined checked separately - `x != null` (present) or `x == null` (absent) covers both'
+message: 'Null and undefined checked separately - `x != null` (present) or `x == null` (absent) covers both when `x` has no side effects'
 metadata:
   weight: 5
   category: slop
